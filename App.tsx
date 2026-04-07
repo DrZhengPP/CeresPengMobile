@@ -1,11 +1,67 @@
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View, Text } from 'react-native';
+import { WebView } from 'react-native-webview';
+import { useFonts } from 'expo-font';
+
+const Geist_600SemiBold = require('@expo-google-fonts/geist/600SemiBold/Geist_600SemiBold.ttf');
+import CeresLogo from './components/CeresLogo';
+
+const MAP_HTML = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body, #map { width: 100%; height: 100%; background: #1a1a2e; }
+    .leaflet-control-attribution { font-size: 9px; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <script>
+    var map = L.map('map', {
+      center: [20, 0],
+      zoom: 3,
+      zoomControl: false,
+      attributionControl: true,
+    });
+    L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      {
+        maxZoom: 19,
+        attribution: 'Tiles &copy; Esri &mdash; Source: Esri, Maxar, GeoEye, Earthstar Geographics',
+      }
+    ).addTo(map);
+  </script>
+</body>
+</html>
+`;
 
 export default function App() {
+  const [fontsLoaded] = useFonts({ Geist_600SemiBold });
+
   return (
     <View style={styles.container}>
-      <Text>Open up App.tsx to start working on your app!</Text>
-      <StatusBar style="auto" />
+      <StatusBar style="light" />
+      <WebView
+        style={styles.map}
+        source={{ html: MAP_HTML }}
+        originWhitelist={['*']}
+        javaScriptEnabled
+        domStorageEnabled
+        startInLoadingState={false}
+        androidLayerType="hardware"
+      />
+      <View style={styles.menu}>
+        <CeresLogo size={30} />
+        <Text style={[styles.title, fontsLoaded && { fontFamily: 'Geist_600SemiBold' }]}>
+          Vulcan CeresPeng
+        </Text>
+      </View>
     </View>
   );
 }
@@ -13,8 +69,24 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+  },
+  map: {
+    flex: 11,
+  },
+  menu: {
+    flex: 1,
+    maxHeight: 60,
+    backgroundColor: '#ffffff',
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    paddingHorizontal: 14,
+    gap: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#e5e7eb',
+  },
+  title: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111827',
   },
 });
