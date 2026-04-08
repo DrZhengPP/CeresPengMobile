@@ -100,6 +100,32 @@ config.server = {
         return;
       }
 
+      // GET /api/dates/<client>/<name>
+      const datesMatch = req.url.match(/^\/api\/dates\/([^/]+)\/(.+)$/);
+      if (datesMatch) {
+        const client = decodeURIComponent(datesMatch[1]);
+        const name = decodeURIComponent(datesMatch[2]);
+        try {
+          const p = await getPool();
+          const result = await p
+            .request()
+            .input('client', sql.NVarChar, client)
+            .input('name', sql.NVarChar, name)
+            .query(
+              'SELECT date FROM CeresPengSchema.downloads WHERE client = @client AND name = @name ORDER BY date DESC'
+            );
+          const dates = result.recordset.map((r) => {
+            const d = new Date(r.date);
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+          });
+          jsonOk(res, dates);
+        } catch (err) {
+          console.error('[/api/dates]', err.message);
+          jsonErr(res, err);
+        }
+        return;
+      }
+
       metroMiddleware(req, res, next);
     };
   },

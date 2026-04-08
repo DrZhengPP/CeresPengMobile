@@ -12,7 +12,7 @@ import {
 
 const API_URL = (process.env.EXPO_PUBLIC_API_URL ?? '').replace(/\/$/, '');
 
-type Screen = 'partners' | 'farms';
+type Screen = 'partners' | 'farms' | 'dates';
 
 async function apiFetch<T>(path: string): Promise<T> {
   const controller = new AbortController();
@@ -27,28 +27,31 @@ async function apiFetch<T>(path: string): Promise<T> {
 }
 
 interface Props {
-  onSelectFarm?: (partner: string, farm: string) => void;
+  onSelectDate?: (partner: string, farm: string, date: string) => void;
   onClear?: () => void;
 }
 
-export default function PartnerDropdown({ onSelectFarm, onClear }: Props) {
+export default function PartnerDropdown({ onSelectDate, onClear }: Props) {
   const [modalVisible, setModalVisible] = useState(false);
   const [screen, setScreen] = useState<Screen>('partners');
   const [search, setSearch] = useState('');
 
-  // Partner state
   const [partners, setPartners] = useState<string[]>([]);
   const [partnersLoading, setPartnersLoading] = useState(false);
   const [partnersError, setPartnersError] = useState<string | null>(null);
   const [selectedPartner, setSelectedPartner] = useState<string | null>(null);
 
-  // Farm state
   const [farms, setFarms] = useState<string[]>([]);
   const [farmsLoading, setFarmsLoading] = useState(false);
   const [farmsError, setFarmsError] = useState<string | null>(null);
   const [selectedFarm, setSelectedFarm] = useState<string | null>(null);
 
-  // Load partners once on mount
+  const [dates, setDates] = useState<string[]>([]);
+  const [datesLoading, setDatesLoading] = useState(false);
+  const [datesError, setDatesError] = useState<string | null>(null);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+
+  // Load partners once
   useEffect(() => {
     if (!API_URL) return;
     setPartnersLoading(true);
@@ -58,7 +61,7 @@ export default function PartnerDropdown({ onSelectFarm, onClear }: Props) {
       .finally(() => setPartnersLoading(false));
   }, []);
 
-  // Load farms when a partner is selected
+  // Load farms when partner selected
   useEffect(() => {
     if (!selectedPartner) return;
     setFarmsLoading(true);
@@ -70,6 +73,20 @@ export default function PartnerDropdown({ onSelectFarm, onClear }: Props) {
       .finally(() => setFarmsLoading(false));
   }, [selectedPartner]);
 
+  // Load dates when farm selected
+  useEffect(() => {
+    if (!selectedPartner || !selectedFarm) return;
+    setDatesLoading(true);
+    setDates([]);
+    setDatesError(null);
+    apiFetch<string[]>(
+      `/api/dates/${encodeURIComponent(selectedPartner)}/${encodeURIComponent(selectedFarm)}`
+    )
+      .then((data) => { setDates(data); setDatesError(null); })
+      .catch((e: Error) => { if (e.name !== 'AbortError') setDatesError(e.message); })
+      .finally(() => setDatesLoading(false));
+  }, [selectedPartner, selectedFarm]);
+
   function openModal() {
     setScreen('partners');
     setSearch('');
@@ -79,47 +96,71 @@ export default function PartnerDropdown({ onSelectFarm, onClear }: Props) {
   function handlePartnerPress(partner: string) {
     setSelectedPartner(partner);
     setSelectedFarm(null);
+    setSelectedDate(null);
     setSearch('');
     setScreen('farms');
   }
 
   function handleFarmPress(farm: string) {
     setSelectedFarm(farm);
-    setModalVisible(false);
+    setSelectedDate(null);
     setSearch('');
-    onSelectFarm?.(selectedPartner!, farm);
+    setScreen('dates');
   }
 
-  function handleBackToPartners() {
-    setScreen('partners');
+  function handleDatePress(date: string) {
+    setSelectedDate(date);
+    setModalVisible(false);
     setSearch('');
+    onSelectDate?.(selectedPartner!, selectedFarm!, date);
+  }
+
+  function handleBack() {
+    setSearch('');
+    if (screen === 'dates') setScreen('farms');
+    else if (screen === 'farms') setScreen('partners');
   }
 
   function handleClear() {
     setSelectedPartner(null);
     setSelectedFarm(null);
+    setSelectedDate(null);
     setSearch('');
     onClear?.();
   }
 
   // Trigger label
-  const triggerLabel = selectedFarm
+  const triggerLabel = selectedDate
+    ? `${selectedFarm} · ${selectedDate}`
+    : selectedFarm
     ? `${selectedPartner} › ${selectedFarm}`
-    : selectedPartner
-    ? selectedPartner
-    : null;
+    : selectedPartner ?? null;
 
-  const filteredPartners = search.trim()
-    ? partners.filter((p) => p.toLowerCase().includes(search.toLowerCase()))
-    : partners;
+  const filtered = {
+    partners: search.trim()
+      ? partners.filter((p) => p.toLowerCase().includes(search.toLowerCase()))
+      : partners,
+    farms: search.trim()
+      ? farms.filter((f) => f.toLowerCase().includes(search.toLowerCase()))
+      : farms,
+    dates: search.trim()
+      ? dates.filter((d) => d.includes(search))
+      : dates,
+  }[screen];
 
-  const filteredFarms = search.trim()
-    ? farms.filter((f) => f.toLowerCase().includes(search.toLowerCase()))
-    : farms;
+  const sheetTitle =
+    screen === 'partners' ? 'Select Partner' :
+    screen === 'farms' ? selectedPartner! :
+    selectedFarm!;
+
+  const placeholder =
+    screen === 'partners' ? 'Search partners…' :
+    screen === 'farms' ? 'Search farms…' :
+    'Search dates…';
 
   return (
     <>
-      {/* ── Trigger button ── */}
+      {/* Trigger */}
       <Pressable style={styles.trigger} onPress={openModal} accessibilityRole="button">
         {partnersLoading ? (
           <ActivityIndicator size="small" color="#6b7280" />
@@ -137,13 +178,14 @@ export default function PartnerDropdown({ onSelectFarm, onClear }: Props) {
         )}
       </Pressable>
 
-      {/* ── Bottom-sheet modal ── */}
+      {/* Bottom-sheet modal */}
       <Modal
         visible={modalVisible}
         transparent
         animationType="slide"
         onRequestClose={() => {
-          if (screen === 'farms') { handleBackToPartners(); } else { setModalVisible(false); }
+          if (screen !== 'partners') handleBack();
+          else setModalVisible(false);
         }}
       >
         <Pressable style={styles.backdrop} onPress={() => setModalVisible(false)} />
@@ -151,25 +193,32 @@ export default function PartnerDropdown({ onSelectFarm, onClear }: Props) {
 
           {/* Header */}
           <View style={styles.header}>
-            {screen === 'farms' ? (
-              <Pressable onPress={handleBackToPartners} style={styles.backBtn} hitSlop={8}>
+            {screen !== 'partners' ? (
+              <Pressable onPress={handleBack} style={styles.backBtn} hitSlop={8}>
                 <Text style={styles.backText}>‹ Back</Text>
               </Pressable>
             ) : (
               <View style={styles.backBtn} />
             )}
-            <Text style={styles.sheetTitle}>
-              {screen === 'partners' ? 'Select Partner' : selectedPartner!}
-            </Text>
+            <Text style={styles.sheetTitle} numberOfLines={1}>{sheetTitle}</Text>
             <Pressable onPress={() => setModalVisible(false)} style={styles.closeBtn} hitSlop={8}>
               <Text style={styles.closeText}>✕</Text>
             </Pressable>
           </View>
 
+          {/* Breadcrumb on farms/dates screens */}
+          {screen !== 'partners' && (
+            <Text style={styles.breadcrumb} numberOfLines={1}>
+              {screen === 'farms'
+                ? selectedPartner
+                : `${selectedPartner} › ${selectedFarm}`}
+            </Text>
+          )}
+
           {/* Search */}
           <TextInput
             style={styles.searchInput}
-            placeholder={screen === 'partners' ? 'Search partners…' : 'Search farms…'}
+            placeholder={placeholder}
             placeholderTextColor="#9ca3af"
             value={search}
             onChangeText={setSearch}
@@ -178,58 +227,51 @@ export default function PartnerDropdown({ onSelectFarm, onClear }: Props) {
           />
 
           {/* List */}
-          {screen === 'partners' ? (
-            partnersError ? (
-              <Text style={styles.errorText}>Failed to load: {partnersError}</Text>
-            ) : (
+          {(() => {
+            const isLoading =
+              (screen === 'partners' && partnersLoading) ||
+              (screen === 'farms' && farmsLoading) ||
+              (screen === 'dates' && datesLoading);
+            const error =
+              screen === 'partners' ? partnersError :
+              screen === 'farms' ? farmsError :
+              datesError;
+            const selected =
+              screen === 'partners' ? selectedPartner :
+              screen === 'farms' ? selectedFarm :
+              selectedDate;
+            const showChevron = screen !== 'dates';
+
+            if (error) return <Text style={styles.errorText}>Failed to load: {error}</Text>;
+
+            return (
               <FlatList
-                data={filteredPartners}
+                data={filtered as string[]}
                 keyExtractor={(item) => item}
                 keyboardShouldPersistTaps="handled"
                 renderItem={({ item }) => (
                   <Pressable
-                    style={[styles.item, item === selectedPartner && styles.itemSelected]}
-                    onPress={() => handlePartnerPress(item)}
+                    style={[styles.item, item === selected && styles.itemSelected]}
+                    onPress={() =>
+                      screen === 'partners' ? handlePartnerPress(item) :
+                      screen === 'farms' ? handleFarmPress(item) :
+                      handleDatePress(item)
+                    }
                   >
-                    <Text style={[styles.itemText, item === selectedPartner && styles.itemTextSelected]}>
+                    <Text style={[styles.itemText, item === selected && styles.itemTextSelected]}>
                       {item}
                     </Text>
-                    <Text style={styles.itemChevron}>›</Text>
+                    {showChevron && <Text style={styles.itemChevron}>›</Text>}
                   </Pressable>
                 )}
                 ListEmptyComponent={
-                  partnersLoading
+                  isLoading
                     ? <ActivityIndicator style={{ marginTop: 24 }} color="#6b7280" />
-                    : <Text style={styles.emptyText}>No partners found</Text>
+                    : <Text style={styles.emptyText}>No results found</Text>
                 }
               />
-            )
-          ) : (
-            farmsError ? (
-              <Text style={styles.errorText}>Failed to load: {farmsError}</Text>
-            ) : (
-              <FlatList
-                data={filteredFarms}
-                keyExtractor={(item) => item}
-                keyboardShouldPersistTaps="handled"
-                renderItem={({ item }) => (
-                  <Pressable
-                    style={[styles.item, item === selectedFarm && styles.itemSelected]}
-                    onPress={() => handleFarmPress(item)}
-                  >
-                    <Text style={[styles.itemText, item === selectedFarm && styles.itemTextSelected]}>
-                      {item}
-                    </Text>
-                  </Pressable>
-                )}
-                ListEmptyComponent={
-                  farmsLoading
-                    ? <ActivityIndicator style={{ marginTop: 24 }} color="#6b7280" />
-                    : <Text style={styles.emptyText}>No farms found</Text>
-                }
-              />
-            )
-          )}
+            );
+          })()}
         </View>
       </Modal>
     </>
@@ -270,7 +312,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    maxHeight: '60%',
+    maxHeight: '65%',
     backgroundColor: '#ffffff',
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
@@ -305,6 +347,13 @@ const styles = StyleSheet.create({
   closeText: {
     fontSize: 14,
     color: '#6b7280',
+  },
+  breadcrumb: {
+    fontSize: 12,
+    color: '#9ca3af',
+    textAlign: 'center',
+    paddingHorizontal: 20,
+    marginBottom: 2,
   },
   searchInput: {
     marginHorizontal: 16,
