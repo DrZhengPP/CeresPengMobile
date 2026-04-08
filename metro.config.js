@@ -135,6 +135,34 @@ config.server = {
         return;
       }
 
+      // GET /api/products/<client>/<name>/<date>
+      const productsMatch = req.url.match(/^\/api\/products\/([^/]+)\/([^/]+)\/(.+)$/);
+      if (productsMatch) {
+        const client = decodeURIComponent(productsMatch[1]);
+        const name   = decodeURIComponent(productsMatch[2]);
+        const date   = decodeURIComponent(productsMatch[3]);
+        const PRODUCT_COLUMNS = ['Raw', 'NDVI', 'NDVI_norm', 'GNDVI', 'GNDVI_norm', 'NDRE', 'NDRE_norm', 'NDMI', 'NDMI_norm', 'Change'];
+        try {
+          const p = await getPool();
+          const result = await p
+            .request()
+            .input('client', sql.NVarChar, client)
+            .input('name',   sql.NVarChar, name)
+            .input('date',   sql.NVarChar, date)
+            .query(
+              `SELECT ${PRODUCT_COLUMNS.join(', ')} FROM CeresPengSchema.downloads WHERE client = @client AND name = @name AND CAST(date AS DATE) = @date`
+            );
+          const available = result.recordset.length === 0
+            ? []
+            : PRODUCT_COLUMNS.filter((col) => result.recordset[0][col] === true);
+          jsonOk(res, available);
+        } catch (err) {
+          console.error('[/api/products]', err.message);
+          jsonErr(res, err);
+        }
+        return;
+      }
+
       metroMiddleware(req, res, next);
     };
   },
