@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? '';
+const API_URL = (process.env.EXPO_PUBLIC_API_URL ?? '').replace(/\/$/, '');
 
 interface Props {
   onSelect?: (partner: string | null) => void;
@@ -25,8 +25,14 @@ export default function PartnerDropdown({ onSelect }: Props) {
   const [selected, setSelected] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!API_URL) {
+      // No API URL configured — stay silent, dropdown simply won't load data
+      return;
+    }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
     setLoading(true);
-    fetch(`${API_URL}/api/clients`)
+    fetch(`${API_URL}/api/clients`, { signal: controller.signal })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
@@ -35,8 +41,17 @@ export default function PartnerDropdown({ onSelect }: Props) {
         setPartners(data);
         setError(null);
       })
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false));
+      .catch((e: Error) => {
+        if (e.name !== 'AbortError') setError(e.message);
+      })
+      .finally(() => {
+        clearTimeout(timeout);
+        setLoading(false);
+      });
+    return () => {
+      controller.abort();
+      clearTimeout(timeout);
+    };
   }, []);
 
   const filtered = search.trim()
