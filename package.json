@@ -21,6 +21,7 @@
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",
     "@types/react": "~19.1.0",
+    "babel-preset-expo": "^55.0.16",
     "typescript": "~5.9.2"
   },
   "private": true
