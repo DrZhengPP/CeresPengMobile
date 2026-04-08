@@ -49,9 +49,21 @@ async function getPool() {
 }
 
 // ── Custom API middleware ──────────────────────────────────────────────────────
+function jsonOk(res, data) {
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.end(JSON.stringify(data));
+}
+
+function jsonErr(res, err) {
+  res.writeHead(500);
+  res.end(JSON.stringify({ error: err.message }));
+}
+
 config.server = {
   enhanceMiddleware: (metroMiddleware) => {
     return async (req, res, next) => {
+      // GET /api/clients
       if (req.url === '/api/clients') {
         try {
           const p = await getPool();
@@ -60,17 +72,34 @@ config.server = {
             .query(
               "SELECT DISTINCT client FROM CeresPengSchema.clients WHERE status = 'active' ORDER BY client"
             );
-          const clients = result.recordset.map((r) => r.client);
-          res.setHeader('Content-Type', 'application/json');
-          res.setHeader('Access-Control-Allow-Origin', '*');
-          res.end(JSON.stringify(clients));
+          jsonOk(res, result.recordset.map((r) => r.client));
         } catch (err) {
-          console.error('[/api/clients] SQL error:', err.message);
-          res.writeHead(500);
-          res.end(JSON.stringify({ error: err.message }));
+          console.error('[/api/clients]', err.message);
+          jsonErr(res, err);
         }
         return;
       }
+
+      // GET /api/farms/<client>
+      const farmsMatch = req.url.match(/^\/api\/farms\/(.+)$/);
+      if (farmsMatch) {
+        const client = decodeURIComponent(farmsMatch[1]);
+        try {
+          const p = await getPool();
+          const result = await p
+            .request()
+            .input('client', sql.NVarChar, client)
+            .query(
+              "SELECT name FROM CeresPengSchema.clients WHERE client = @client AND status = 'active' ORDER BY name"
+            );
+          jsonOk(res, result.recordset.map((r) => r.name));
+        } catch (err) {
+          console.error('[/api/farms]', err.message);
+          jsonErr(res, err);
+        }
+        return;
+      }
+
       metroMiddleware(req, res, next);
     };
   },
