@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "main": "index.ts",
   "scripts": {
-    "start": "expo start",
-    "android": "expo run:android",
+    "start": "node scripts/start.js",
+    "android": "adb reverse tcp:8081 tcp:8081 && expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web"
   },
@@ -22,7 +22,7 @@
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",
     "@types/react": "~19.1.0",
-    "babel-preset-expo": "^55.0.16",
+    "babel-preset-expo": "~54.0.10",
     "typescript": "~5.9.2"
   },
   "private": true

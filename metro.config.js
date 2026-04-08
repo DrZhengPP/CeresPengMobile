@@ -1,6 +1,15 @@
 // Learn more https://docs.expo.io/guides/customizing-metro
 const { getDefaultConfig } = require('expo/metro-config');
 const path = require('path');
+const { execSync } = require('child_process');
+
+// Ensure adb reverse is active whenever Metro starts
+try {
+  execSync('adb reverse tcp:8081 tcp:8081', { stdio: 'pipe' });
+  console.log('[metro] adb reverse tcp:8081 tcp:8081 OK');
+} catch {
+  // Emulator not connected yet — harmless, app will reconnect after adb reverse is run
+}
 
 // Load .env manually for the Metro (Node.js) process.
 // EXPO_PUBLIC_* vars are loaded by Expo automatically for the bundle;
