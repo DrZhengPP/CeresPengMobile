@@ -58,10 +58,12 @@ export default function App() {
         androidLayerType="hardware"
       />
       <View style={styles.menu}>
-        <CeresLogo size={30} />
-        <Text style={[styles.title, fontsLoaded && { fontFamily: 'Geist_600SemiBold' }]}>
-          Vulcan CeresPeng
-        </Text>
+        <View style={styles.brand}>
+          <CeresLogo size={30} />
+          <Text style={[styles.title, fontsLoaded && { fontFamily: 'Geist_600SemiBold' }]}>
+            Vulcan CeresPeng
+          </Text>
+        </View>
         <View style={styles.divider} />
         <PartnerDropdown />
       </View>
@@ -86,6 +88,12 @@ const styles = StyleSheet.create({
     gap: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: '#e5e7eb',
+  },
+  brand: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 0,
   },
   title: {
     fontSize: 16,
