@@ -5,6 +5,7 @@ import { useFonts } from 'expo-font';
 
 const Geist_600SemiBold = require('@expo-google-fonts/geist/600SemiBold/Geist_600SemiBold.ttf');
 import CeresLogo from './components/CeresLogo';
+import PartnerDropdown from './components/PartnerDropdown';
 
 const MAP_HTML = `
 <!DOCTYPE html>
@@ -61,6 +62,8 @@ export default function App() {
         <Text style={[styles.title, fontsLoaded && { fontFamily: 'Geist_600SemiBold' }]}>
           Vulcan CeresPeng
         </Text>
+        <View style={styles.divider} />
+        <PartnerDropdown />
       </View>
     </View>
   );
@@ -88,5 +91,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#111827',
+  },
+  divider: {
+    width: StyleSheet.hairlineWidth,
+    height: 24,
+    backgroundColor: '#e5e7eb',
   },
 });
