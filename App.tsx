@@ -10,19 +10,7 @@ import PartnerDropdown, { Selection } from './components/PartnerDropdown';
 
 const API_URL = (process.env.EXPO_PUBLIC_API_URL ?? '').replace(/\/$/, '');
 
-// Convert ArrayBuffer → base64 string (React Native has no Buffer, btoa is available)
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  // Process in 32 KB chunks to avoid stack overflow with spread operator
-  const CHUNK = 0x8000;
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode(...(bytes.subarray(i, i + CHUNK) as unknown as number[]));
-  }
-  return btoa(binary);
-}
-
-// ── Leaflet map HTML (all layer rendering happens via injected JS) ─────────────
+// ── Leaflet map HTML ──────────────────────────────────────────────────────────
 const MAP_HTML = `<!DOCTYPE html>
 <html>
 <head>
@@ -35,9 +23,9 @@ const MAP_HTML = `<!DOCTYPE html>
     html, body, #map { width: 100%; height: 100%; background: #1a1a2e; }
     .leaflet-control-attribution { font-size: 9px; }
     .polygon-label {
-      background: transparent; border: none; box-shadow: none;
-      font-size: 11px; font-weight: bold; color: #fff;
-      text-shadow: 0 0 3px #000, 0 0 3px #000;
+      background: transparent !important; border: none !important;
+      box-shadow: none !important; font-size: 10px; font-weight: bold;
+      color: #fff; text-shadow: 0 0 3px #000, 0 0 3px #000;
     }
   </style>
 </head>
@@ -49,21 +37,30 @@ const MAP_HTML = `<!DOCTYPE html>
     });
     L.tileLayer(
       'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-      { maxZoom: 19, attribution: 'Tiles &copy; Esri &mdash; Source: Esri, Maxar, GeoEye, Earthstar Geographics' }
+      { maxZoom: 19, attribution: 'Tiles &copy; Esri' }
     ).addTo(map);
 
     var shapeLayer = null;
     var imageLayers = [];
     var polygonId = null;
+    // Map from normalised label → Leaflet layer, built when GeoJSON is loaded
+    var labelToLayer = {};
 
     function clearLayers() {
       if (shapeLayer) { map.removeLayer(shapeLayer); shapeLayer = null; }
       imageLayers.forEach(function(l) { map.removeLayer(l); });
       imageLayers = [];
       polygonId = null;
+      labelToLayer = {};
     }
 
-    // Step 1: receive GeoJSON from RN, render polygons, fly to bounds
+    // Normalise a polygon field value the same way Python names image files:
+    // spaces → underscores, then trim.
+    function normalise(s) {
+      return String(s || '').replace(/ /g, '_').trim();
+    }
+
+    // Step 1 – called from RN with stringified GeoJSON
     function loadGeoJSON(jsonStr) {
       var geojson = JSON.parse(jsonStr);
       clearLayers();
@@ -72,8 +69,11 @@ const MAP_HTML = `<!DOCTYPE html>
       shapeLayer = L.geoJSON(geojson, {
         style: { color: '#ff4444', weight: 2, fillColor: 'transparent', fillOpacity: 0 },
         onEachFeature: function(feature, layer) {
-          var label = polygonId && feature.properties
-            ? String(feature.properties[polygonId] || '') : '';
+          var raw = polygonId && feature.properties
+            ? (feature.properties[polygonId] || '') : '';
+          var label = String(raw);
+          // Index by normalised label for fast image lookup
+          labelToLayer[normalise(raw)] = layer;
           if (label) {
             layer.bindTooltip(label, {
               permanent: true, direction: 'center', className: 'polygon-label',
@@ -82,37 +82,34 @@ const MAP_HTML = `<!DOCTYPE html>
         },
       }).addTo(map);
 
-      // invalidateSize first, then fitBounds after a short delay so Leaflet
-      // has the correct container dimensions
       map.invalidateSize();
       setTimeout(function() {
         var bounds = shapeLayer.getBounds();
-        if (bounds.isValid()) {
-          map.fitBounds(bounds, { padding: [24, 24], maxZoom: 15 });
-        }
+        if (bounds.isValid()) map.fitBounds(bounds, { padding: [24, 24], maxZoom: 15 });
       }, 150);
     }
 
-    // Step 2: receive pre-fetched images as base64 data URIs from RN
+    // Step 2 – called from RN with stringified [{label, url}] where url is
+    // the full http://localhost:8081/api/blob-proxy?... path.
+    // The WebView can reach localhost:8081 via adb reverse (cleartext allowed).
     function loadImages(jsonStr) {
-      var images = JSON.parse(jsonStr); // [{label, dataUri}]
+      var images = JSON.parse(jsonStr);
       if (!shapeLayer) return;
 
       images.forEach(function(img) {
-        shapeLayer.eachLayer(function(layer) {
-          if (!layer.feature || !layer.feature.properties) return;
-          var featureLabel = polygonId
-            ? String(layer.feature.properties[polygonId] || '').trim()
-            : '';
-          if (featureLabel.toLowerCase() !== img.label.toLowerCase()) return;
+        // Match image filename label against polygon field value.
+        // CeresPengWeb: featureLabel.replace(/ /g,'_') === img.label
+        var layer = labelToLayer[img.label];
+        if (!layer) return;
 
-          var bounds = layer.getBounds();
-          if (!bounds.isValid()) return;
+        var bounds = layer.getBounds();
+        if (!bounds.isValid()) return;
 
-          var overlay = L.imageOverlay(img.dataUri, bounds, { opacity: 1, interactive: false });
-          overlay.addTo(map);
-          imageLayers.push(overlay);
-        });
+        // imageOverlay renders the PNG (with alpha transparency) exactly
+        // within the polygon bounding box. Transparent pixels are see-through.
+        var overlay = L.imageOverlay(img.url, bounds, { opacity: 1, interactive: false });
+        overlay.addTo(map);
+        imageLayers.push(overlay);
       });
     }
 
@@ -131,49 +128,42 @@ export default function App() {
 
   async function handleSelect(sel: Selection) {
     setStatus('Loading shapefile…');
-
     try {
-      // ── 1. Fetch shapefile in RN (guaranteed network access) ──────────────
+      // Fetch shapefile in RN (reliable adb-reverse network)
       const shapeRes = await fetch(
         `${API_URL}/api/shapefile/${encodeURIComponent(sel.farm)}`
       );
       const geojson = await shapeRes.json();
 
-      // Inject GeoJSON → WebView renders polygons and pans immediately
+      // Send GeoJSON to WebView → renders polygons + pans camera
       webviewRef.current?.injectJavaScript(
         `loadGeoJSON(${JSON.stringify(JSON.stringify(geojson))}); true;`
       );
 
-      // ── 2. Fetch image list ───────────────────────────────────────────────
+      // Fetch image list in RN
       setStatus('Loading images…');
-      const imgListRes = await fetch(
+      const imgRes = await fetch(
         `${API_URL}/api/images/${encodeURIComponent(sel.farm)}` +
         `/${encodeURIComponent(sel.date)}/${encodeURIComponent(sel.product)}`
       );
-      const imgList: { label: string; url: string }[] = await imgListRes.json();
+      const imgList: { label: string; url: string }[] = await imgRes.json();
 
-      if (imgList.length === 0) {
-        setStatus(null);
-        return;
-      }
+      if (imgList.length === 0) { setStatus(null); return; }
 
-      // ── 3. Fetch all images in parallel → base64 data URIs ───────────────
-      setStatus(`Fetching ${imgList.length} images…`);
-      const imageData = await Promise.all(
-        imgList.map(async (img) => {
-          const r = await fetch(`${API_URL}${img.url}`);
-          const buf = await r.arrayBuffer();
-          const dataUri = `data:image/png;base64,${arrayBufferToBase64(buf)}`;
-          return { label: img.label, dataUri };
-        })
-      );
+      // Build full URLs so the WebView can fetch them directly.
+      // usesCleartextTraffic=true + adb reverse means localhost:8081 is
+      // reachable from the WebView just as it is from RN.
+      const imagesWithFullUrl = imgList.map((img) => ({
+        label: img.label,
+        url: `${API_URL}${img.url}`,
+      }));
 
-      // ── 4. Inject image data URIs into WebView ───────────────────────────
+      // Pass only the small label→URL list (not the image bytes themselves)
       webviewRef.current?.injectJavaScript(
-        `loadImages(${JSON.stringify(JSON.stringify(imageData))}); true;`
+        `loadImages(${JSON.stringify(JSON.stringify(imagesWithFullUrl))}); true;`
       );
-      setStatus(null);
 
+      setStatus(null);
     } catch (e) {
       console.error('handleSelect error:', e);
       setStatus(null);
