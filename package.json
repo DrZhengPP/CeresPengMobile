@@ -9,6 +9,7 @@
     "web": "expo start --web"
   },
   "dependencies": {
+    "@azure/storage-blob": "^12.31.0",
     "@expo-google-fonts/geist": "^0.4.1",
     "expo": "~54.0.33",
     "expo-font": "~14.0.11",
@@ -17,7 +18,8 @@
     "react": "19.1.0",
     "react-native": "0.81.5",
     "react-native-svg": "15.12.1",
-    "react-native-webview": "13.15.0"
+    "react-native-webview": "13.15.0",
+    "shapefile": "^0.6.6"
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",

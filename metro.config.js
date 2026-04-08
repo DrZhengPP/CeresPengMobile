@@ -37,6 +37,22 @@ const blockListRegex = new RegExp(
 );
 config.resolver = { ...config.resolver, blockList: blockListRegex };
 
+// ── Azure Blob helpers (server-side only) ─────────────────────────────────────
+const { BlobServiceClient } = require('@azure/storage-blob');
+const shapefile = require('shapefile');
+
+function getBlobServiceClient() {
+  return BlobServiceClient.fromConnectionString(process.env.VulcanBlob);
+}
+
+// Convert a Node Buffer to a plain ArrayBuffer (avoids pool-slice issues)
+function bufferToArrayBuffer(buf) {
+  const ab = new ArrayBuffer(buf.length);
+  const view = new Uint8Array(ab);
+  for (let i = 0; i < buf.length; i++) view[i] = buf[i];
+  return ab;
+}
+
 // ── SQL helpers (server-side only) ────────────────────────────────────────────
 const sql = require('mssql');
 
@@ -159,6 +175,113 @@ config.server = {
         } catch (err) {
           console.error('[/api/products]', err.message);
           jsonErr(res, err);
+        }
+        return;
+      }
+
+      // GET /api/shapefile/<name>
+      const shapefileMatch = req.url.match(/^\/api\/shapefile\/(.+)$/);
+      if (shapefileMatch) {
+        const name = decodeURIComponent(shapefileMatch[1]);
+        try {
+          const p = await getPool();
+          const result = await p
+            .request()
+            .input('name', sql.NVarChar, name)
+            .query(
+              "SELECT container_name, blob_name, shape_name, polygon_id FROM CeresPengSchema.clients WHERE name = @name AND status = 'active'"
+            );
+          if (result.recordset.length === 0) {
+            res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return;
+          }
+          const { container_name, blob_name, shape_name, polygon_id } = result.recordset[0];
+          const containerClient = getBlobServiceClient().getContainerClient(container_name);
+          const shpPath = `${blob_name}/input/${name}/shape_file/${shape_name}.shp`;
+          const dbfPath = `${blob_name}/input/${name}/shape_file/${shape_name}.dbf`;
+          const [shpBuf, dbfBuf] = await Promise.all([
+            containerClient.getBlobClient(shpPath).downloadToBuffer(),
+            containerClient.getBlobClient(dbfPath).downloadToBuffer(),
+          ]);
+          const source = await shapefile.open(bufferToArrayBuffer(shpBuf), bufferToArrayBuffer(dbfBuf));
+          const features = [];
+          let item = await source.read();
+          while (!item.done) { features.push(item.value); item = await source.read(); }
+          jsonOk(res, { type: 'FeatureCollection', features, polygon_id });
+        } catch (err) {
+          console.error('[/api/shapefile]', err.message);
+          jsonErr(res, err);
+        }
+        return;
+      }
+
+      // GET /api/images/<name>/<date>/<product>
+      const imagesMatch = req.url.match(/^\/api\/images\/([^/]+)\/([^/]+)\/([^/?]+)/);
+      if (imagesMatch) {
+        const name    = decodeURIComponent(imagesMatch[1]);
+        const date    = decodeURIComponent(imagesMatch[2]);
+        const product = decodeURIComponent(imagesMatch[3]);
+        try {
+          const p = await getPool();
+          const result = await p
+            .request()
+            .input('name', sql.NVarChar, name)
+            .query(
+              "SELECT container_name, blob_name FROM CeresPengSchema.clients WHERE name = @name AND status = 'active'"
+            );
+          if (result.recordset.length === 0) {
+            res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return;
+          }
+          const { container_name, blob_name } = result.recordset[0];
+          const containerClient = getBlobServiceClient().getContainerClient(container_name);
+          const dateFolder = date.replace(/-/g, '');
+          const outputPrefix = `${blob_name}/output/${name}/${dateFolder}/`;
+          let hashFolder = '';
+          for await (const blob of containerClient.listBlobsFlat({ prefix: outputPrefix })) {
+            const rel = blob.name.slice(outputPrefix.length);
+            const seg = rel.split('/')[0];
+            if (seg) { hashFolder = seg; break; }
+          }
+          if (!hashFolder) { jsonOk(res, []); return; }
+          const productPrefix = `${outputPrefix}${hashFolder}/${product}/`;
+          const images = [];
+          for await (const blob of containerClient.listBlobsFlat({ prefix: productPrefix })) {
+            if (!blob.name.endsWith('.png')) continue;
+            const fileName = blob.name.split('/').pop();
+            const stem = fileName.slice(0, -4);
+            const label = (product === 'Raw' || product === 'Change')
+              ? stem
+              : stem.slice(0, -(product.length + 1));
+            images.push({
+              label,
+              url: `/api/blob-proxy?container=${encodeURIComponent(container_name)}&path=${encodeURIComponent(blob.name)}`,
+            });
+          }
+          jsonOk(res, images);
+        } catch (err) {
+          console.error('[/api/images]', err.message);
+          jsonErr(res, err);
+        }
+        return;
+      }
+
+      // GET /api/blob-proxy?container=...&path=...
+      if (req.url.startsWith('/api/blob-proxy')) {
+        const urlObj = new URL(req.url, 'http://localhost');
+        const container = urlObj.searchParams.get('container');
+        const blobPath  = urlObj.searchParams.get('path');
+        if (!container || !blobPath) {
+          res.writeHead(400); res.end('Missing params'); return;
+        }
+        try {
+          const containerClient = getBlobServiceClient().getContainerClient(container);
+          const buf = await containerClient.getBlobClient(blobPath).downloadToBuffer();
+          res.setHeader('Content-Type', 'image/png');
+          res.setHeader('Cache-Control', 'public, max-age=3600');
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.end(buf);
+        } catch (err) {
+          console.error('[/api/blob-proxy]', err.message);
+          res.writeHead(500); res.end('Blob fetch failed');
         }
         return;
       }
