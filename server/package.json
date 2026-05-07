@@ -1,0 +1,14 @@
+{
+  "name": "cerespeng-api",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@azure/storage-blob": "^12.31.0",
+    "dotenv": "^16.0.0",
+    "mssql": "^12.2.1",
+    "shapefile": "^0.6.6"
+  }
+}

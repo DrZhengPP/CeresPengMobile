@@ -266,7 +266,7 @@ config.server = {
 
       // GET /api/blob-proxy?container=...&path=...
       if (req.url.startsWith('/api/blob-proxy')) {
-        const urlObj = new URL(req.url, 'http://localhost');
+        const urlObj = new URL(req.url, 'https://www.cerespeng.com');
         const container = urlObj.searchParams.get('container');
         const blobPath  = urlObj.searchParams.get('path');
         if (!container || !blobPath) {
